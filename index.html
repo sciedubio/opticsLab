@@ -125,6 +125,7 @@
                 if (type === 'success') { playTone(523.25, 'sine', 0.1); setTimeout(()=>playTone(659.25, 'sine', 0.2), 100); }
                 else if (type === 'error') { playTone(300, 'square', 0.15); setTimeout(()=>playTone(250, 'square', 0.2), 150); }
                 else if (type === 'complete') { playTone(523.25, 'sine', 0.1); setTimeout(()=>playTone(659.25, 'sine', 0.1), 100); setTimeout(()=>playTone(783.99, 'sine', 0.2), 200); setTimeout(()=>playTone(1046.50, 'sine', 0.4), 300); }
+                else if (type === 'unlock') { playTone(659.25, 'sine', 0.1); setTimeout(()=>playTone(880, 'sine', 0.3), 100); }
             } catch(e) {}
         };
 
@@ -243,34 +244,41 @@
       .setMimeType(ContentService.MimeType.JSON);
   }
 }`;
+            
+            const handleCopy = async (e) => {
+                const btn = e.target;
+                try {
+                    await navigator.clipboard.writeText(codeString);
+                    btn.innerText = "복사 완료!";
+                } catch (err) {
+                    const textArea = document.createElement("textarea");
+                    textArea.value = codeString;
+                    textArea.style.position = "fixed";
+                    textArea.style.left = "-9999px";
+                    document.body.appendChild(textArea);
+                    textArea.select();
+                    document.execCommand("copy");
+                    document.body.removeChild(textArea);
+                    btn.innerText = "복사 완료!";
+                }
+                setTimeout(() => btn.innerText = "코드 복사", 3000);
+            };
+
             return (
                 <Modal isOpen={isOpen} title="DB 연동 및 배포 가이드" onClose={onClose}>
                     <div className="space-y-6 text-sm">
                         <section className="bg-slate-800/50 p-4 rounded-xl border border-slate-700">
                             <h4 className="font-bold text-cyan-400 text-lg mb-2 flex items-center gap-2">① 구글 시트 1행 헤더</h4>
-                            <code className="block bg-slate-900 p-3 rounded-lg text-emerald-300 font-mono text-[10px] sm:text-[11px] overflow-x-auto whitespace-nowrap">
+                            <code className="block bg-slate-900 p-3 rounded-lg text-emerald-300 font-mono text-[10px] sm:text-[11px] overflow-x-auto whitespace-nowrap select-all">
                                 timestamp | studentId | studentName | gameScore | workshopScore | records | insight
                             </code>
                         </section>
                         <section className="bg-slate-800/50 p-4 rounded-xl border border-slate-700">
                             <div className="flex justify-between items-center mb-2">
                                 <h4 className="font-bold text-cyan-400 text-lg flex items-center gap-2">② Apps Script 작성</h4>
-                                <button onClick={(e) => { 
-                                    const textArea = document.createElement("textarea");
-                                    textArea.value = codeString;
-                                    textArea.style.position = "fixed";
-                                    textArea.style.left = "-9999px";
-                                    document.body.appendChild(textArea);
-                                    textArea.select();
-                                    document.execCommand("copy");
-                                    document.body.removeChild(textArea);
-                                    
-                                    const btn = e.target;
-                                    btn.innerText = "복사 완료!"; 
-                                    setTimeout(() => btn.innerText = "코드 복사", 2000); 
-                                }} className="px-3 py-1 bg-slate-700 hover:bg-slate-600 rounded text-xs text-white transition">코드 복사</button>
+                                <button onClick={handleCopy} className="px-3 py-1 bg-slate-700 hover:bg-slate-600 rounded text-xs text-white transition">코드 복사</button>
                             </div>
-                            <pre className="bg-slate-900 p-3 rounded-lg text-slate-300 font-mono text-[10px] sm:text-[11px] overflow-x-auto"><code>{codeString}</code></pre>
+                            <pre className="bg-slate-900 p-3 rounded-lg text-slate-300 font-mono text-[10px] sm:text-[11px] overflow-x-auto select-all"><code>{codeString}</code></pre>
                         </section>
                         <section className="bg-slate-800/50 p-4 rounded-xl border border-slate-700">
                             <h4 className="font-bold text-cyan-400 text-lg mb-2">③ 배포 방법</h4>
@@ -296,8 +304,47 @@
             const [workshopScore, setWorkshopScore] = useState(0);
             const [labRecords, setLabRecords] = useState([]);
             const [finalStudentName, setFinalStudentName] = useState('');
+            const [progress, setProgress] = useState(0); 
+            const [isTeacherMode, setIsTeacherMode] = useState(false); // 선생님 모드 상태 추가
+
+            // 보고서 상태
+            const [reportData, setReportData] = useState({ studentId: '', studentName: '', insight: '' });
+            const [tableAnswers, setTableAnswers] = useState({
+                planeMirror: '', convexMirror: '', concaveMirror: '', convexLens: '', concaveLens: ''
+            });
+
+            // 선생님 전용 이스터에그 (연속 클릭 감지)
+            const clickCountRef = useRef(0);
+            const clickTimeoutRef = useRef(null);
+
+            const handleSecretUnlock = () => {
+                clickCountRef.current += 1;
+                if (clickCountRef.current >= 5) {
+                    setProgress(3); // 모든 단계 즉시 잠금 해제
+                    setIsTeacherMode(true); // 선생님 프리패스 모드 활성화
+                    playSound('unlock');
+                    showAlert("👨‍🏫 [선생님 전용 모드]\n모든 단계의 잠금이 해제되었습니다!\n각 탭 하단의 '프리패스' 버튼으로 빠르게 건너뛸 수 있으며, 최종 보고서 검사도 무사통과 됩니다.");
+                    clickCountRef.current = 0;
+                }
+                clearTimeout(clickTimeoutRef.current);
+                clickTimeoutRef.current = setTimeout(() => {
+                    clickCountRef.current = 0;
+                }, 800); // 0.8초 내에 5번 클릭
+            };
             
             const showAlert = (msg) => setAlertInfo({ show: true, msg });
+
+            // 새로고침 방지
+            useEffect(() => {
+                const handleBeforeUnload = (e) => {
+                    if (labRecords.length > 0 || gameScore > 0 || workshopScore > 0 || reportData.studentId) {
+                        e.preventDefault();
+                        e.returnValue = ''; 
+                    }
+                };
+                window.addEventListener('beforeunload', handleBeforeUnload);
+                return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+            }, [labRecords, gameScore, workshopScore, reportData]);
 
             const tabInfo = {
                 lab: { name: '가상 실험실', color: 'bg-cyan-500 shadow-[0_0_10px_#06b6d4]' },
@@ -323,7 +370,7 @@
                                 <div className="w-14 h-14 sm:w-16 sm:h-16 bg-amber-500/20 rounded-2xl flex items-center justify-center text-3xl shadow-[0_0_15px_rgba(245,158,11,0.5)]">🔍</div>
                                 <div className="w-14 h-14 sm:w-16 sm:h-16 bg-emerald-500/20 rounded-2xl flex items-center justify-center text-3xl shadow-[0_0_15px_rgba(16,185,129,0.5)]">👓</div>
                             </div>
-                            <h1 className="hero-title tracking-tight text-white">빛과 렌즈 <span className="neon-text-cyan">마스터</span></h1>
+                            <h1 className="hero-title tracking-tight text-white cursor-pointer select-none" onClick={handleSecretUnlock}>빛과 렌즈 <span className="neon-text-cyan">마스터</span></h1>
                             <p className="text-base md:text-lg text-slate-300 font-light leading-relaxed">
                                 원리를 탐구하는 <strong className="text-cyan-400">가상 실험실</strong>, 
                                 배운 것을 확인하는 <strong className="text-amber-400">스와이프 게임</strong>,<br className="hidden md:block"/>
@@ -346,20 +393,17 @@
                     <div className="min-h-screen flex flex-col relative pb-[72px] md:pb-0">
                         <header className="bg-slate-900/80 backdrop-blur-md border-b border-slate-700 sticky top-0 z-40 p-4">
                             <div className="max-w-7xl mx-auto flex justify-between items-center">
-                                <h1 className="font-bold text-lg text-white flex items-center gap-2">
+                                <h1 className="font-bold text-lg text-white flex items-center gap-2 cursor-pointer select-none" onClick={handleSecretUnlock}>
                                     <span className={`w-3 h-3 rounded-full ${tabInfo[activeTab].color}`}></span>
                                     {tabInfo[activeTab].name}
                                 </h1>
-                                <button onClick={() => setView('report')} className="bg-gradient-to-r from-violet-600 to-indigo-600 text-white px-4 py-1.5 rounded-lg font-bold text-sm btn-neon shadow-lg active:scale-95">
-                                    최종 보고서 📝
-                                </button>
                             </div>
                         </header>
 
                         <main className="flex-1 w-full max-w-7xl mx-auto overflow-hidden relative">
-                            {activeTab === 'lab' && <LabTab records={labRecords} setRecords={setLabRecords} showAlert={showAlert} />}
-                            {activeTab === 'game' && <GameTab score={gameScore} setScore={setGameScore} />}
-                            {activeTab === 'workshop' && <WorkshopTab score={workshopScore} setScore={setWorkshopScore} />}
+                            {activeTab === 'lab' && <LabTab records={labRecords} setRecords={setLabRecords} showAlert={showAlert} isTeacherMode={isTeacherMode} onComplete={() => { setProgress(Math.max(progress, 1)); setActiveTab('game'); playSound('success'); }} />}
+                            {activeTab === 'game' && <GameTab score={gameScore} setScore={setGameScore} isTeacherMode={isTeacherMode} onComplete={() => { setProgress(Math.max(progress, 2)); setActiveTab('workshop'); playSound('success'); }} />}
+                            {activeTab === 'workshop' && <WorkshopTab score={workshopScore} setScore={setWorkshopScore} isTeacherMode={isTeacherMode} onComplete={() => { setProgress(Math.max(progress, 3)); setView('report'); playSound('success'); }} />}
                         </main>
 
                         <nav className="fixed bottom-0 left-0 w-full bg-slate-900 border-t border-slate-700 z-50 md:sticky md:bottom-auto md:border-t-0 md:bg-transparent md:p-4 md:flex md:justify-center">
@@ -367,17 +411,17 @@
                                 <button onClick={() => setActiveTab('lab')} className={`flex-1 py-2 px-1 flex flex-col md:flex-row items-center justify-center gap-1 transition-colors ${activeTab === 'lab' ? 'text-cyan-400 md:bg-slate-700 md:rounded-full' : 'text-slate-400 hover:text-slate-200'}`}>
                                     <Icons.Flask /> <span className="text-[11px] md:text-sm font-bold">가상실험</span>
                                 </button>
-                                <button onClick={() => setActiveTab('game')} className={`flex-1 py-2 px-1 flex flex-col md:flex-row items-center justify-center gap-1 transition-colors ${activeTab === 'game' ? 'text-amber-400 md:bg-slate-700 md:rounded-full' : 'text-slate-400 hover:text-slate-200'}`}>
-                                    <Icons.Gamepad /> <span className="text-[11px] md:text-sm font-bold">분류게임</span>
+                                <button onClick={() => progress >= 1 && setActiveTab('game')} className={`flex-1 py-2 px-1 flex flex-col md:flex-row items-center justify-center gap-1 transition-colors ${activeTab === 'game' ? 'text-amber-400 md:bg-slate-700 md:rounded-full' : progress >= 1 ? 'text-slate-400 hover:text-slate-200' : 'text-slate-600 cursor-not-allowed'}`}>
+                                    <Icons.Gamepad /> <span className="text-[11px] md:text-sm font-bold">분류게임 {progress < 1 && '🔒'}</span>
                                 </button>
-                                <button onClick={() => setActiveTab('workshop')} className={`flex-1 py-2 px-1 flex flex-col md:flex-row items-center justify-center gap-1 transition-colors ${activeTab === 'workshop' ? 'text-emerald-400 md:bg-slate-700 md:rounded-full' : 'text-slate-400 hover:text-slate-200'}`}>
-                                    <Icons.Storefront /> <span className="text-[11px] md:text-sm font-bold">해결공방</span>
+                                <button onClick={() => progress >= 2 && setActiveTab('workshop')} className={`flex-1 py-2 px-1 flex flex-col md:flex-row items-center justify-center gap-1 transition-colors ${activeTab === 'workshop' ? 'text-emerald-400 md:bg-slate-700 md:rounded-full' : progress >= 2 ? 'text-slate-400 hover:text-slate-200' : 'text-slate-600 cursor-not-allowed'}`}>
+                                    <Icons.Storefront /> <span className="text-[11px] md:text-sm font-bold">해결공방 {progress < 2 && '🔒'}</span>
                                 </button>
                             </div>
                         </nav>
                         
                         <Modal isOpen={alertInfo.show} title="알림" onClose={() => setAlertInfo({ show: false, msg: '' })}>
-                            <p className="text-lg text-center py-4">{alertInfo.msg}</p>
+                            <p className="text-lg text-center py-4 whitespace-pre-line">{alertInfo.msg}</p>
                             <button onClick={() => setAlertInfo({ show: false, msg: '' })} className="w-full mt-4 py-3 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl font-bold">확인</button>
                         </Modal>
                     </div>
@@ -385,15 +429,13 @@
             }
 
             if (view === 'report') {
-                return <ReportView goBack={() => setView('app')} gameScore={gameScore} workshopScore={workshopScore} labRecords={labRecords} onComplete={(name) => { setFinalStudentName(name); setView('done'); playSound('complete'); }} showAlert={showAlert} />;
+                return <ReportView goBack={() => setView('app')} gameScore={gameScore} workshopScore={workshopScore} labRecords={labRecords} reportData={reportData} setReportData={setReportData} tableAnswers={tableAnswers} setTableAnswers={setTableAnswers} isTeacherMode={isTeacherMode} onComplete={(name) => { setFinalStudentName(name); setView('done'); playSound('complete'); }} showAlert={showAlert} />;
             }
 
             if (view === 'done') {
                 return (
                     <div className="min-h-screen flex items-center justify-center p-4 md:p-6 text-center">
-                        {/* 빛과 렌즈 마스터 인증서 디자인 */}
                         <div className="glass-panel p-8 md:p-12 rounded-xl max-w-xl w-full border-4 border-double border-amber-500/50 shadow-[0_0_30px_rgba(245,158,11,0.2)] bg-slate-900/90 relative overflow-hidden animate-[drop-in_0.5s_ease-out]">
-                            {/* 장식용 모서리 */}
                             <div className="absolute top-0 left-0 w-16 h-16 bg-amber-500/20 rounded-br-full"></div>
                             <div className="absolute bottom-0 right-0 w-16 h-16 bg-cyan-500/20 rounded-tl-full"></div>
                             
@@ -418,8 +460,13 @@
                             
                             <p className="text-xs text-slate-500 mb-6 bg-slate-800/50 inline-block px-3 py-1 rounded-full">💡 화면을 캡처하여 자랑스럽게 보관해보세요!</p>
                             
-                            <button onClick={() => { setView('intro'); setGameScore(0); setWorkshopScore(0); setLabRecords([]); setActiveTab('lab'); }} className="w-full max-w-xs py-3 rounded-xl bg-slate-700 hover:bg-slate-600 text-white font-bold active:scale-95 transition-all mx-auto block">
-                                처음으로 돌아가기
+                            <button onClick={() => { 
+                                // 완전 초기화
+                                setView('intro'); setGameScore(0); setWorkshopScore(0); setLabRecords([]); setProgress(0); setActiveTab('lab'); setIsTeacherMode(false);
+                                setReportData({ studentId: '', studentName: '', insight: '' });
+                                setTableAnswers({ planeMirror: '', convexMirror: '', concaveMirror: '', convexLens: '', concaveLens: '' });
+                            }} className="w-full max-w-xs py-3 rounded-xl bg-slate-700 hover:bg-slate-600 text-white font-bold active:scale-95 transition-all mx-auto block">
+                                처음으로 돌아가기 (다음 사람)
                             </button>
                         </div>
                     </div>
@@ -428,13 +475,13 @@
         }
 
         // --- 탭 1: 가상 실험실 (Lab Tab) ---
-        function LabTab({ records, setRecords, showAlert }) {
+        function LabTab({ records, setRecords, showAlert, isTeacherMode, onComplete }) {
             const [device, setDevice] = useState('concave_mirror'); 
             const [u, setU] = useState(150); 
             const [showRays, setShowRays] = useState(false);
             const [isDragging, setIsDragging] = useState(false);
-            const [objType, setObjType] = useState('arrow'); // 물체 종류 상태 추가
-            const [showTutorial, setShowTutorial] = useState(true); // 튜토리얼 상태 추가
+            const [objType, setObjType] = useState('arrow'); 
+            const [showTutorial, setShowTutorial] = useState(true); 
             const svgRef = useRef(null);
 
             const deviceOptions = [
@@ -467,18 +514,20 @@
                 let descSize = magSize > 1.05 ? "확대된" : magSize < 0.95 ? "축소된" : "크기가 같은";
                 let descOrient = isInverted ? "거꾸로 선 상" : "똑바로 선 상";
 
-                if (Math.abs(u - f_val) < 2) { 
+                const isNoImage = Math.abs(u - 100) < 2 && (device === 'concave_mirror' || device === 'convex_lens');
+
+                if (isNoImage) { 
                     descSize = "초점 위치"; 
                     descOrient = "(상 안 생김)"; 
                 }
-                return { b, magSize, isReal, isInverted, descSize, descOrient, isMirror, f_val };
+                return { b, magSize, isReal, isInverted, descSize, descOrient, isMirror, f_val, isNoImage };
             }, [device, u]);
 
             const addRecord = () => {
-                const { descSize, descOrient } = physicsInfo;
+                const { descSize, descOrient, isNoImage } = physicsInfo;
                 let distType = u <= 80 ? "가까울 때" : u <= 180 ? "멀 때" : "아주 멀 때";
                 const devName = deviceOptions.find(d => d.id === device).name;
-                const resultStr = u === 100 ? "상 없음" : `${descSize} ${descOrient}`;
+                const resultStr = isNoImage ? "상 없음" : `${descSize} ${descOrient}`;
                 
                 if(records.some(r => r.device === devName && Math.abs(r.u - u) < 5)) {
                     showAlert("이미 기록된 비슷한 조건이 있습니다."); return;
@@ -498,7 +547,7 @@
             const handlePointerUp = (e) => { if(isDragging) { setIsDragging(false); e.target.releasePointerCapture(e.pointerId); } };
 
             const renderRays = () => {
-                if (!showRays || Math.abs(u - 100) < 2) return null;
+                if (!showRays || physicsInfo.isNoImage) return null;
                 const { b, isReal, isInverted, magSize, isMirror } = physicsInfo;
                 const m = magSize * (isInverted ? -1 : 1);
                 const Iy = 200 - 60 * m;
@@ -534,10 +583,12 @@
             let renderMag = magSize > 4 ? 4 : magSize;
             let imgX = isMirror ? (isReal ? 400 - b : 400 + Math.abs(b)) : (isReal ? 400 + b : 400 - Math.abs(b));
             let emojiStr = objType==='apple'?'🍎':objType==='dog'?'🐶':'🚀';
+            
+            // 기록된 기기 종류 수 계산
+            const uniqueDevices = new Set(records.map(r => r.device)).size;
 
             return (
                 <div className="h-full flex flex-col p-4 md:p-6 gap-4 relative">
-                    {/* 튜토리얼 오버레이 */}
                     {showTutorial && (
                         <div className="absolute inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 rounded-3xl">
                             <div className="bg-slate-800 border border-cyan-500/50 p-6 sm:p-8 rounded-2xl max-w-sm w-full text-center shadow-[0_0_30px_rgba(6,182,212,0.3)] animate-[drop-in_0.3s_ease-out]">
@@ -547,6 +598,7 @@
                                     <li>👆 물체(화살표/이모지)를 마우스로 <strong>직접 끌어서</strong> 자유롭게 움직여보세요!</li>
                                     <li>📏 우측 패널에서 관찰 <strong>물체의 종류</strong>를 변경하면 상이 뒤집히는 모습을 쉽게 볼 수 있습니다.</li>
                                     <li>✨ <strong>작도선</strong>을 켜서 빛이 어떻게 꺾이는지 원리를 눈으로 확인하세요.</li>
+                                    <li className="text-amber-400 font-bold border-t border-slate-700 pt-3 mt-3">🔒 4가지 광학 기기를 모두 1번 이상 표에 기록해야 다음 단계가 열립니다!</li>
                                 </ul>
                                 <button onClick={() => { setShowTutorial(false); playSound('success'); }} className="w-full py-3 sm:py-4 bg-cyan-600 hover:bg-cyan-500 text-white font-bold rounded-xl transition-all shadow-lg active:scale-95 text-lg">알겠어요! 출발 🚀</button>
                             </div>
@@ -567,7 +619,7 @@
                                 <div className="flex-1 bg-slate-900/80 px-4 py-2 rounded-xl border border-slate-700 flex flex-col justify-center">
                                     <span className="text-xs text-slate-400">상의 특징</span>
                                     <span className="text-lg font-bold text-white">
-                                        {u===100 ? "초점 위치 (상 없음)" : <React.Fragment><span className="text-cyan-400">{descSize}</span> <span className="text-purple-400">{descOrient}</span></React.Fragment>}
+                                        {physicsInfo.isNoImage ? "초점 위치 (상 없음)" : <React.Fragment><span className="text-cyan-400">{descSize}</span> <span className="text-purple-400">{descOrient}</span></React.Fragment>}
                                     </span>
                                 </div>
                                 <div className="bg-slate-900/80 px-4 py-2 rounded-xl border border-slate-700 flex flex-col justify-center items-end">
@@ -592,7 +644,6 @@
                                     </g>
                                     {renderRays()}
                                     
-                                    {/* 원본 물체 (드래그 가능) */}
                                     <g transform={`translate(${400 - u}, 200)`} filter="url(#neon-glow)" data-draggable="true" className="draggable-cursor">
                                         <rect x="-20" y="-70" width="40" height="70" fill="transparent" data-draggable="true" /> 
                                         {objType === 'arrow' ? (
@@ -606,8 +657,7 @@
                                         <text x="0" y="20" fill="#facc15" fontSize="14" fontWeight="bold" textAnchor="middle" pointerEvents="none">물체</text>
                                     </g>
                                     
-                                    {/* 상(Image) 렌더링 */}
-                                    {u !== 100 && (imgX >=-100 && imgX <=900) && (
+                                    {!physicsInfo.isNoImage && (imgX >=-100 && imgX <=900) && (
                                         <g transform={`translate(${imgX}, 200)`} filter="url(#neon-glow)" opacity={isReal?1:0.6}>
                                             {objType === 'arrow' ? (
                                                 <React.Fragment>
@@ -628,7 +678,6 @@
 
                         <div className="lg:w-80 flex flex-col gap-3">
                             <div className="glass-panel p-4 rounded-2xl flex flex-col gap-2 relative z-10">
-                                {/* 관찰 물체 변경 옵션 */}
                                 <div className="flex justify-between items-center bg-slate-900/50 p-1.5 rounded-xl border border-slate-700/50 mb-1">
                                     {objOptions.map(o => (
                                         <button key={o.id} onClick={() => setObjType(o.id)} className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-colors ${objType === o.id ? 'bg-amber-500/20 text-amber-400 border border-amber-500/50' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-700/50'}`}>
@@ -646,7 +695,12 @@
                             </div>
 
                             <div className="glass-panel rounded-2xl p-3 flex-1 overflow-y-auto max-h-[25vh] lg:max-h-[30vh]">
-                                <h3 className="text-xs font-bold text-slate-300 mb-2">📊 관찰결과표 ({records.length})</h3>
+                                <div className="flex justify-between items-end mb-2">
+                                    <h3 className="text-xs font-bold text-slate-300">📊 관찰결과표</h3>
+                                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${uniqueDevices >= 4 ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400'}`}>
+                                        기기 종류: {uniqueDevices} / 4
+                                    </span>
+                                </div>
                                 {records.length === 0 ? <p className="text-xs text-slate-500 text-center py-4">기록이 없습니다.</p> : (
                                     <table className="w-full text-[11px] text-left">
                                         <thead className="text-slate-400 bg-slate-800/50"><tr><th className="p-1">기기</th><th className="p-1">거리</th><th className="p-1">특징</th></tr></thead>
@@ -656,6 +710,16 @@
                                     </table>
                                 )}
                             </div>
+                            
+                            {(uniqueDevices >= 4 || isTeacherMode) ? (
+                                <button onClick={() => { playSound('unlock'); onComplete(); }} className="mt-2 w-full py-4 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 rounded-xl text-white font-black text-sm shadow-[0_0_15px_rgba(245,158,11,0.5)] animate-pulse active:scale-95 transition-all">
+                                    {isTeacherMode ? '👨‍🏫 프리패스: 다음 단계(분류 게임) 가기 👉' : '다음 단계(분류 게임)로 넘어가기 👉'}
+                                </button>
+                            ) : (
+                                <p className="mt-2 text-[11px] text-center text-amber-400 bg-amber-900/20 py-2 rounded-xl border border-amber-500/30 font-medium">
+                                    🔒 4가지 광학 기기를 모두 한 번 이상 표에 기록해야 다음 단계가 열립니다.
+                                </p>
+                            )}
                         </div>
                     </div>
                 </div>
@@ -663,7 +727,7 @@
         }
 
         // --- 탭 2: 분류 게임 (Game Tab) ---
-        function GameTab({ score, setScore }) {
+        function GameTab({ score, setScore, isTeacherMode, onComplete }) {
             const [deck, setDeck] = useState([]);
             const [currentIndex, setCurrentIndex] = useState(0);
             const [animClass, setAnimClass] = useState('card-enter');
@@ -718,7 +782,9 @@
                         <div className="text-6xl mb-4">🎉</div>
                         <h2 className="text-3xl font-bold text-amber-400 mb-2">게임 완료!</h2>
                         <p className="text-slate-300 mb-6">획득 점수: <strong className="text-2xl ml-1">{score}</strong> 점</p>
-                        <p className="text-slate-400 text-sm bg-slate-800/50 p-4 rounded-xl border border-slate-700 max-w-sm mx-auto">해결 공방 탭으로 이동하여<br/>손님들의 문제를 직접 해결해보세요!</p>
+                        <button onClick={() => { playSound('unlock'); onComplete(); }} className="w-full max-w-sm py-4 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl font-black shadow-[0_0_15px_rgba(16,185,129,0.5)] transition-all active:scale-95 animate-pulse mt-4 text-lg btn-neon">
+                            다음 단계(해결 공방)로 넘어가기 👉
+                        </button>
                     </div>
                 );
             }
@@ -749,6 +815,12 @@
                         </div>
                     )}
 
+                    {isTeacherMode && !quiz.show && (
+                        <button onClick={() => { playSound('unlock'); onComplete(); }} className="mt-4 mx-auto block w-full max-w-md py-3 bg-slate-800 border border-emerald-500/50 text-emerald-400 hover:bg-slate-700 hover:text-emerald-300 rounded-xl font-bold transition-all active:scale-95 text-sm shadow-lg">
+                            👨‍🏫 선생님 프리패스: [해결 공방] 단계로 건너뛰기 👉
+                        </button>
+                    )}
+
                     <Modal isOpen={feedback.show} title="앗, 다시 생각해볼까요?" onClose={null}>
                         <div className="text-center pb-4">
                             <div className="text-6xl mb-4">🤔</div>
@@ -772,7 +844,7 @@
         }
 
         // --- 탭 3: 안경점 & 공방 (Workshop Tab) ---
-        function WorkshopTab({ score, setScore }) {
+        function WorkshopTab({ score, setScore, isTeacherMode, onComplete }) {
             const [currentIndex, setCurrentIndex] = useState(0);
             const [status, setStatus] = useState('idle'); 
             const [showHint, setShowHint] = useState(false);
@@ -806,7 +878,9 @@
                         <div className="text-6xl mb-4">🏆</div>
                         <h2 className="text-3xl font-bold text-emerald-400 mb-2">모든 손님의 문제를 해결했습니다!</h2>
                         <p className="text-slate-300 mb-6">공방 점수: <strong className="text-2xl ml-1">{score}</strong> 점</p>
-                        <p className="text-slate-400 text-sm bg-slate-800/50 p-4 rounded-xl border border-slate-700 max-w-sm mx-auto">상단의 [최종 보고서] 버튼을 눌러 제출해주세요.</p>
+                        <button onClick={() => { playSound('unlock'); onComplete(); }} className="w-full max-w-sm py-4 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white rounded-xl font-black shadow-[0_0_20px_rgba(139,92,246,0.5)] transition-all active:scale-95 animate-pulse btn-neon mt-4 text-lg">
+                            최종 보고서 작성하기 📝
+                        </button>
                     </div>
                 );
             }
@@ -871,6 +945,12 @@
                                         </button>
                                     </div>
                                     {status === 'error' && <p className="text-rose-400 text-center text-sm font-bold mt-6 bg-rose-900/30 py-2 rounded-lg animate-pulse">앗! 이 도구는 적절하지 않아요. 좌측의 힌트를 확인해보세요.</p>}
+
+                                    {isTeacherMode && (
+                                        <button onClick={() => { playSound('unlock'); onComplete(); }} className="mt-6 w-full py-3 bg-slate-800 border border-purple-500/50 text-purple-400 hover:bg-slate-700 hover:text-purple-300 rounded-xl font-bold transition-all active:scale-95 text-sm shadow-lg">
+                                            👨‍🏫 선생님 프리패스: 바로 [최종 보고서] 가기 📝
+                                        </button>
+                                    )}
                                 </div>
                             ) : (
                                 <div className="glass-panel rounded-3xl p-6 h-full flex flex-col items-center justify-center text-center bg-emerald-900/30 border-2 border-emerald-500/50 card-enter shadow-[0_0_40px_rgba(16,185,129,0.2)]">
@@ -892,33 +972,68 @@
         }
 
         // --- 탭 4: 통합 보고서 제출 (Report View) ---
-        function ReportView({ goBack, gameScore, workshopScore, labRecords, onComplete, showAlert }) {
-            const [data, setData] = useState({ studentId: '', studentName: '', insight: '' });
+        function ReportView({ goBack, gameScore, workshopScore, labRecords, reportData, setReportData, tableAnswers, setTableAnswers, isTeacherMode, onComplete, showAlert }) {
             const [isSubmitting, setIsSubmitting] = useState(false);
 
+            const tableOptions = [
+                { value: '', label: '선택하세요' },
+                { value: 'A', label: '항상 물체와 크기가 같은 똑바로 선 상이 생긴다.' },
+                { value: 'B', label: '항상 물체보다 작고 똑바로 선 상이 생긴다.' },
+                { value: 'C', label: '가까울 땐 크고 똑바로 선 상, 멀어지면 거꾸로 선 상이 생긴다.' },
+            ];
+
+            const handleTableChange = (device, val) => {
+                setTableAnswers(prev => ({ ...prev, [device]: val }));
+            };
+
             const submit = () => {
-                if(!data.studentId || !data.studentName || !data.insight) return showAlert("모든 항목을 입력해주세요.");
+                let finalStudentId = reportData.studentId;
+                let finalStudentName = reportData.studentName;
+                let finalInsight = reportData.insight;
+
+                // 학생 모드일 때만 엄격한 검사 수행
+                if (!isTeacherMode) {
+                    if(!finalStudentId || !finalStudentName || !finalInsight) return showAlert("학번, 이름, 알게 된 점을 모두 입력해주세요.");
+                    
+                    const isTableCorrect = 
+                        tableAnswers.planeMirror === 'A' &&
+                        tableAnswers.convexMirror === 'B' &&
+                        tableAnswers.concaveMirror === 'C' &&
+                        tableAnswers.convexLens === 'C' &&
+                        tableAnswers.concaveLens === 'B';
+
+                    if (!isTableCorrect) {
+                        playSound('error');
+                        return showAlert("거울과 렌즈의 특징 총정리 표를 알맞게 완성해야 제출할 수 있습니다.\n틀린 부분이 없는지 다시 확인해보세요!");
+                    }
+                } else {
+                    // 선생님 프리패스 모드: 빈칸이면 시연용 데이터 자동 삽입
+                    if (!finalStudentId) finalStudentId = "0000";
+                    if (!finalStudentName) finalStudentName = "선생님(시연용)";
+                    if (!finalInsight) finalInsight = "선생님 시연 테스트 제출입니다.";
+                }
+
                 if(!GOOGLE_SCRIPT_URL) return showAlert("DB URL이 연결되지 않았습니다. 우측 상단 가이드를 확인하세요.");
 
                 setIsSubmitting(true);
                 const payload = {
                     timestamp: new Date().toISOString(),
-                    studentId: data.studentId, studentName: data.studentName,
-                    gameScore, workshopScore, records: JSON.stringify(labRecords), insight: data.insight
+                    studentId: finalStudentId, studentName: finalStudentName,
+                    gameScore, workshopScore, records: JSON.stringify(labRecords), insight: "[개념표 완성]\n" + finalInsight
                 };
 
                 fetch(GOOGLE_SCRIPT_URL, { method: 'POST', mode: 'no-cors', headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify(payload) })
-                .then(() => { setTimeout(() => { setIsSubmitting(false); onComplete(data.studentName); }, 1500); })
+                .then(() => { setTimeout(() => { setIsSubmitting(false); onComplete(finalStudentName); }, 1500); })
                 .catch(() => { setIsSubmitting(false); showAlert("제출 중 네트워크 오류가 발생했습니다."); });
             };
 
             return (
-                <div className="min-h-screen p-4 flex justify-center items-center">
-                    <div className="w-full max-w-3xl glass-panel rounded-3xl p-6 md:p-10 relative shadow-[0_0_50px_rgba(0,0,0,0.5)]">
+                <div className="min-h-screen p-4 flex justify-center items-center py-10">
+                    <div className="w-full max-w-3xl glass-panel rounded-3xl p-6 md:p-10 relative shadow-[0_0_50px_rgba(0,0,0,0.5)] max-h-[95vh] overflow-y-auto">
                         <button onClick={goBack} className="absolute top-6 left-6 text-slate-400 hover:text-white transition font-bold text-sm bg-slate-800/50 px-3 py-1.5 rounded-lg border border-slate-700">◀ 돌아가기</button>
-                        <h2 className="text-3xl font-black text-center mb-10 mt-10 neon-text-purple tracking-tight">최종 학습 보고서</h2>
+                        <h2 className="text-3xl font-black text-center mb-8 mt-10 neon-text-purple tracking-tight">최종 학습 보고서</h2>
 
-                        <div className="grid grid-cols-3 gap-3 md:gap-6 mb-10 text-sm">
+                        <div className="grid grid-cols-3 gap-3 md:gap-6 mb-8 text-sm">
                             <div className="bg-slate-800/80 p-4 md:p-6 rounded-2xl border-2 border-cyan-500/30 text-center flex flex-col justify-center shadow-lg transform transition hover:-translate-y-1">
                                 <div className="text-slate-400 text-xs md:text-sm font-bold mb-2">실험실 기록</div>
                                 <div className="text-2xl md:text-3xl font-black text-cyan-400">{labRecords.length} <span className="text-xs md:text-sm font-medium">건</span></div>
@@ -933,23 +1048,63 @@
                             </div>
                         </div>
 
+                        {/* 거울과 렌즈 총정리 표 */}
+                        <div className="bg-slate-800/80 p-5 rounded-2xl border border-slate-600 mb-8 shadow-inner">
+                            <h3 className="text-lg font-bold text-cyan-400 mb-3">🔍 거울과 렌즈의 특징 총정리</h3>
+                            <p className="text-sm text-slate-300 mb-4 bg-slate-900/50 px-3 py-2 rounded-lg border border-slate-700">
+                                알맞은 상의 특징을 선택해주세요. <strong>모두 맞혀야만 제출할 수 있습니다!</strong>
+                            </p>
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-sm text-left border-collapse">
+                                    <thead>
+                                        <tr className="bg-slate-700/80 text-slate-200 text-center">
+                                            <th className="p-3 border border-slate-600 rounded-tl-lg w-1/4">광학 기기</th>
+                                            <th className="p-3 border border-slate-600 rounded-tr-lg">상의 특징</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="bg-slate-900/50">
+                                        {[
+                                            { id: 'planeMirror', label: '🪞 평면거울', color: 'text-white' },
+                                            { id: 'convexMirror', label: '🚘 볼록 거울', color: 'text-blue-300' },
+                                            { id: 'concaveMirror', label: '💄 오목 거울', color: 'text-cyan-300' },
+                                            { id: 'convexLens', label: '🔍 볼록 렌즈', color: 'text-purple-300' },
+                                            { id: 'concaveLens', label: '👓 오목 렌즈', color: 'text-fuchsia-300' }
+                                        ].map(device => (
+                                            <tr key={device.id}>
+                                                <td className={`p-3 border border-slate-700 font-bold ${device.color} text-center`}>{device.label}</td>
+                                                <td className="p-2 border border-slate-700">
+                                                    <select 
+                                                        className="w-full bg-slate-800 border border-slate-600 rounded-lg p-2 text-white outline-none focus:border-cyan-500 cursor-pointer"
+                                                        value={tableAnswers[device.id]}
+                                                        onChange={(e) => handleTableChange(device.id, e.target.value)}
+                                                    >
+                                                        {tableOptions.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+                                                    </select>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
                         <div className="space-y-6">
                             <div className="flex flex-col sm:flex-row gap-5">
                                 <div className="flex-1">
                                     <label className="block text-sm font-bold text-slate-300 ml-1 mb-2">학번</label>
-                                    <input type="text" placeholder="예: 2101" value={data.studentId} onChange={e=>setData({...data,studentId:e.target.value})} className="w-full bg-slate-900/80 border border-slate-600 rounded-xl p-4 text-white focus:border-purple-400 focus:ring-1 focus:ring-purple-400 outline-none transition text-lg" />
+                                    <input type="text" placeholder="예: 2101" value={reportData.studentId} onChange={e=>setReportData({...reportData,studentId:e.target.value})} className="w-full bg-slate-900/80 border border-slate-600 rounded-xl p-4 text-white focus:border-purple-400 focus:ring-1 focus:ring-purple-400 outline-none transition text-base" />
                                 </div>
                                 <div className="flex-1">
                                     <label className="block text-sm font-bold text-slate-300 ml-1 mb-2">이름</label>
-                                    <input type="text" placeholder="홍길동" value={data.studentName} onChange={e=>setData({...data,studentName:e.target.value})} className="w-full bg-slate-900/80 border border-slate-600 rounded-xl p-4 text-white focus:border-purple-400 focus:ring-1 focus:ring-purple-400 outline-none transition text-lg" />
+                                    <input type="text" placeholder="홍길동" value={reportData.studentName} onChange={e=>setReportData({...reportData,studentName:e.target.value})} className="w-full bg-slate-900/80 border border-slate-600 rounded-xl p-4 text-white focus:border-purple-400 focus:ring-1 focus:ring-purple-400 outline-none transition text-base" />
                                 </div>
                             </div>
                             <div className="flex flex-col">
                                 <label className="block text-sm font-bold text-slate-300 ml-1 mb-2">종합하여 알게 된 점</label>
-                                <textarea placeholder="세 가지 활동(실험, 게임, 공방)을 통해 거울과 렌즈에 대해 새롭게 알게 된 점을 구체적으로 적어보세요." value={data.insight} onChange={e=>setData({...data,insight:e.target.value})} className="w-full min-h-[150px] bg-slate-900/80 border border-slate-600 rounded-xl p-5 text-white focus:border-purple-400 focus:ring-1 focus:ring-purple-400 outline-none resize-none transition leading-relaxed text-base"></textarea>
+                                <textarea placeholder="활동을 통해 거울과 렌즈에 대해 새롭게 알게 된 점을 구체적으로 적어보세요." value={reportData.insight} onChange={e=>setReportData({...reportData,insight:e.target.value})} className="w-full min-h-[120px] bg-slate-900/80 border border-slate-600 rounded-xl p-5 text-white focus:border-purple-400 focus:ring-1 focus:ring-purple-400 outline-none resize-none transition leading-relaxed text-base"></textarea>
                             </div>
-                            <button onClick={submit} disabled={isSubmitting} className="w-full py-5 mt-4 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-black text-xl transition-transform active:scale-95 disabled:opacity-50 shadow-[0_0_20px_rgba(139,92,246,0.4)] btn-neon">
-                                {isSubmitting ? "데이터를 전송하는 중..." : "최종 결과 제출하기 🚀"}
+                            <button onClick={submit} disabled={isSubmitting} className={`w-full py-5 mt-2 rounded-xl ${isTeacherMode ? 'bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 shadow-[0_0_20px_rgba(245,158,11,0.4)]' : 'bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 shadow-[0_0_20px_rgba(139,92,246,0.4)]'} text-white font-black text-xl transition-transform active:scale-95 disabled:opacity-50 btn-neon`}>
+                                {isSubmitting ? "데이터를 전송하는 중..." : isTeacherMode ? "선생님 프리패스 제출 🚀" : "최종 결과 제출하기 🚀"}
                             </button>
                         </div>
                     </div>
